@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# KALIHACK - Bug Bounty & Pentesting Skill Launcher
+set -euo pipefail
+
+SKILLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/skills" && pwd)"
+MULTI_AGENT_DIR="$SKILLS_DIR/multi-agent"
+SESSION_FILE="/tmp/kalihack_session_$$.json"
+LOG_FILE="/tmp/kalihack_$$.log"
+
+log() { echo "[+] $*" | tee -a "$LOG_FILE"; }
+warn() { echo "[!] $*" | tee -a "$LOG_FILE"; }
+error() { echo "[-] $*" | tee -a "$LOG_FILE"; exit 1; }
+info() { echo "[i] $*" | tee -a "$LOG_FILE"; }
+
+check_deps() {
+  local deps=(python3 curl jq git)
+  local missing=()
+  for d in "${deps[@]}"; do [ ! -f "$d" ] && missing+=("$d"); done
+  if [ ${#missing[@]} -gt 0 ]; then
+    warn "Missing: ${missing[*]}"
+    info "Installing..."
+    if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y "${missing[@]}"
+    elif command -v dnf >/dev/null; then sudo dnf install -y "${missing[@]}"
+    elif command -v brew >/dev/null; then brew install "${missing[@]}"
+    else error "Cannot auto-install. Install manually: ${missing[*]}"
+    fi
+  fi
+  log "Dependencies OK."
+}
+
+check_kali() {
+  if [ -f /etc/os-release ]; then source /etc/os-release; if [[ "$ID" == "kali" ]]; then log "Kali detected"; else warn "Not Kali"; fi; fi
+}
+
+install_tools() {
+  local tools=(nmap gobuster ffuf curl python3)
+  local miss=()
+  for t in "${tools[@]}"; do [ ! -x "$t" ] && miss+=("$t"); done
+  if [ ${#miss[@]} -gt 0 ]; then warn "Missing tools: ${miss[*]}"; info "Attempting install..."; fi
+}
+
+run_flow() {
+  local target="$1"; local scope="$2"
+  log "Starting flow for $target"
+  cat > "$SESSION_FILE" <<EOF
+{
+  "session_id":"kalihack_$(date +%s)",
+  "target":"$target",
+  "scope":["$target","*.${target#https://}"],
+  "time_budget_seconds":7200,
+  "time_used_seconds":0,
+  "agents_status":{},"tasks":{},"findings":{"subdomains":[],"technologies":[],"endpoints":[],"vulnerabilities":[]},
+  "escalations":{},"blockers":[],"artifacts":{},"metrics":{"total_requests":0,"unique_vulns_found":0,"confirmed_vulns":0,"blocked_tasks":0,"escalations_handled":0}}
+}
+EOF
+  info "Session saved: $SESSION_FILE"
+}
+
+main() {
+  clear
+  echo "╔═══════════════════════════════════════════════════════════╗"
+  echo "║          KALIHACK - Bug Bounty & Pentesting              ║"
+  echo "╚═══════════════════════════════════════════════════════════╝"
+  check_deps
+  check_kali
+  install_tools
+  read -p "Target URL/IP (e.g., https://example.com or 192.168.1.1): " TARGET
+  if [[ -z "$TARGET" ]]; then error "Need target."; fi
+  if [[ ! "$TARGET" =~ ^https?:// ]] && [[ ! "$TARGET" =~ ^[0-9.]+$ ]]; then TARGET="https://$TARGET"; fi
+  local SCOPE="$TARGET"
+  run_flow "$TARGET" "$SCOPE"
+  echo ""
+  echo "╔═══════════════════════════════════════════════════════════╗"
+  echo "║                    KALIHACK COMPLETADO                     ║"
+  echo "║  Target: $TARGET  Session: $(grep session_id < "$SESSION_FILE" | cut -d' ' -f2)""
+  echo "╚═══════════════════════════════════════════════════════════╝"
+}
+
+main "$@"
